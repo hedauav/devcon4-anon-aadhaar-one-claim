@@ -1,10 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  experimental: {
-    // Server-only packages loaded with Node's own require (native addon, snarkjs wasm).
-    serverComponentsExternalPackages: ['better-sqlite3', '@anon-aadhaar/core', 'snarkjs'],
-  },
+  // Server-only packages loaded with Node's own require (native addon, snarkjs wasm).
+  serverExternalPackages: ['better-sqlite3', '@anon-aadhaar/core', 'snarkjs'],
   webpack: (config, { isServer }) => {
     if (!isServer) {
       // snarkjs / ffjavascript reference Node built-ins that are unused in the browser prover.

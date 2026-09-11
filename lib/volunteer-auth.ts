@@ -8,8 +8,8 @@ import { SESSION_COOKIE, getSessionSecret, verifySessionToken } from './session'
  */
 
 /** For server components (e.g. app/volunteer/page.tsx). */
-export function isVolunteer(): boolean {
-  const token = cookies().get(SESSION_COOKIE)?.value;
+export async function isVolunteer(): Promise<boolean> {
+  const token = (await cookies()).get(SESSION_COOKIE)?.value;
   return verifySessionToken(token, getSessionSecret());
 }
 
