@@ -77,7 +77,7 @@ npm run dev
    - **Duplicates turned away**: second attempts by someone who already has a slot this cycle,
    - **Left to review**: verified applications still pending your decision.
 6. **Review.** Click **Approve** or **Reject** on each application. You see only the reference, the answers and the time. There's no name or number to look up, and that's intentional.
-7. **Close the cycle.** Click **Close cycle** when intake ends. New submissions are refused. When you open a new cycle, everyone can apply once again.
+7. **Close the cycle.** When intake ends, click **Close cycle…**, then **Yes, stop accepting applications**. New submissions are refused. When you open a new cycle, everyone can apply once again.
 
 ---
 
@@ -86,9 +86,9 @@ npm run dev
 1. In `.env.local`, set `USE_TEST_AADHAAR=true` and `ELIGIBLE_STATE=Delhi`. The SDK's test identity lives in Delhi.
 2. Start the app, log in at `/volunteer` and open a cycle.
 3. Generate a **fresh** test QR at <https://documentation.anon-aadhaar.pse.dev/docs/generate-qr>. Click **Generate New Value** and save the QR image. The proof carries the QR's signing time (rounded down to the hour by the circuit, which the server allows for), and with `QR_MAX_AGE_SECONDS=3600` a QR signed more than about an hour ago is refused, so generate a new one if yours is old.
-4. Go to `/apply`, answer the two questions, click **Start application**, then upload the saved QR image in the Anon Aadhaar window and generate the proof.
+4. Go to `/apply`, answer the two questions, click **Continue to eligibility proof**, then upload the saved QR image in the Anon Aadhaar window and generate the proof.
    - The first run downloads the circuit artifacts (tens of MB). Proving takes about 1–3 minutes, depending on the device.
-5. Submit. You get a reference number, and the dashboard shows **Verified entries: 1**.
+5. Click **Submit application**. You get a reference number, and the dashboard shows **Verified entries: 1**.
 6. **Try to cheat.** Apply again with the same QR (or a freshly generated test QR, which is the same test person) in the same cycle. The proof verifies, but the nullifier is already on record, so you see "You already have an application in this cycle" and **Duplicates turned away** goes up.
 7. Close the cycle and open a new one. The same person can apply once in the new cycle.
 
