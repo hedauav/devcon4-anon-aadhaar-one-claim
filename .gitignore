@@ -1,0 +1,33 @@
+# dependencies
+node_modules/
+
+# next.js
+.next/
+out/
+next-env.d.ts
+
+# env files (only the placeholder template is tracked)
+.env
+.env*
+!.env.example
+
+# local database (applications + nullifier ledger)
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+data/
+
+# hardhat
+artifacts/
+cache/
+typechain-types/
+coverage/
+coverage.json
+
+# misc
+*.log
+*.tsbuildinfo
+.DS_Store
+.vscode/
+.idea/

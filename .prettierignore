@@ -1,0 +1,11 @@
+node_modules
+.next
+out
+artifacts
+cache
+typechain-types
+coverage
+data
+package-lock.json
+next-env.d.ts
+*.sol
