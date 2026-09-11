@@ -200,6 +200,15 @@ test/
 
 ---
 
+## Known advisories (`npm audit`)
+
+**Next.js and React.** The app runs on Next.js 15.5.25, which is patched against the critical Next 14 advisories, with React 19. `@anon-aadhaar/react` 2.4.3 still declares a React 18 peer dependency, so `package.json` uses npm `overrides` to run it on React 19. We verified this end to end with real test-mode proofs. Next 15 still carries a moderate advisory that is fixed only in Next 16. We stay on 15 because Next 16 removes `next lint`, and because the SDK has no React 19 release yet. The app uses no middleware and no Server Actions.
+
+`npm audit fix` without `--force` resolves none of the remaining advisories. They fall into two groups:
+
+- **Contract toolchain (development only).** Hardhat 2 and `@nomicfoundation/hardhat-toolbox` 6 bring in advisories through their transitive dependencies. Fixing them needs semver-major upgrades (Hardhat 3, toolbox 7). These packages run only on developer machines and in CI, never in the web server or the browser.
+- **Anon Aadhaar SDK dependencies.** `@anon-aadhaar/core` 2.4.3 is the latest release. It depends on `@zk-email/helpers`, which pins a git build of `snarkjs`, along with a few older utility libraries. There is no patched SDK release. The server uses the SDK only to hash signals and to run groth16 `verify()`, and only after `lib/intake.ts` has validated the proof's shape against a strict schema.
+
 ## Known limitations
 
 - **The browser SDK keeps and logs its proof.** `@anon-aadhaar/react` saves the serialized proof in the applicant's `localStorage` (key `anonAadhaar`) and prints its state to the browser console; that is SDK behaviour we can't switch off. The app deletes that key when the apply flow opens, after every submission (accepted or refused), and when the applicant leaves the page, and it logs out of the SDK. What the SDK keeps is only the proof, never QR data. This server never logs proofs.
