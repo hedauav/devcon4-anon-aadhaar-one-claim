@@ -25,23 +25,25 @@ const ERRORS: Record<string, string> = {
   action: 'Unknown action.',
 };
 
-function applicantLink(): string {
-  const h = headers();
+async function applicantLink(): Promise<string> {
+  const h = await headers();
   const host = h.get('x-forwarded-host') ?? h.get('host') ?? 'localhost:3000';
   const proto = h.get('x-forwarded-proto') ?? (host.startsWith('localhost') ? 'http' : 'https');
   return `${proto}://${host}/apply`;
 }
 
-export default function VolunteerPage({
+export default async function VolunteerPage({
   searchParams,
 }: {
-  searchParams: { error?: string | string[] };
+  searchParams: Promise<{ error?: string | string[] }>;
 }) {
-  const code = typeof searchParams.error === 'string' ? searchParams.error : undefined;
+  const { error: rawError } = await searchParams;
+  const code = typeof rawError === 'string' ? rawError : undefined;
   const error = code ? ERRORS[code] : undefined;
 
   // Server-side gate: nothing below is rendered (or queried) without a valid volunteer session.
-  if (!isVolunteer()) return <LoginCard error={error} />;
+  if (!(await isVolunteer())) return <LoginCard error={error} />;
+  const applyUrl = await applicantLink();
 
   const db = getDb();
   const openCycle = getOpenCycle(db);
@@ -78,7 +80,7 @@ export default function VolunteerPage({
         </p>
       ) : null}
 
-      <CyclePanel cycle={openCycle} applyUrl={applicantLink()} />
+      <CyclePanel cycle={openCycle} applyUrl={applyUrl} />
 
       {current && stats ? (
         <section className="space-y-4">
