@@ -155,6 +155,11 @@ export function createIntake({ db, config, verifyProof, now = Date.now }: Intake
       form: IntakeForm;
       at: number;
     }): SubmitResult => {
+      // Re-check inside the transaction: the cycle may have closed while the proof was verifying.
+      const cycleRow = db.prepare(`SELECT status FROM cycles WHERE id = ?`).get(args.cycleId) as
+        { status: string } | undefined;
+      if (cycleRow?.status !== 'open') return reject('cycle_closed');
+
       if (hasTakenSlot(db, args.cycleId, args.nullifier)) {
         recordDuplicate(args.cycleId, args.at);
         return reject('duplicate');

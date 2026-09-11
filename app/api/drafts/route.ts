@@ -1,6 +1,7 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { loadConfig } from '@/lib/config';
 import { getDb } from '@/lib/db';
+import { draftLimiter, throttleKey } from '@/lib/rate-limit';
 import { signalHashOf } from '@/lib/signal';
 import { createDraft, getOpenCycle } from '@/lib/store';
 
@@ -12,7 +13,15 @@ export const dynamic = 'force-dynamic';
  * the signal the applicant's proof must commit to. The nullifier seed handed back is the office's
  * fixed NULLIFIER_SEED — the browser uses it, but the server re-checks it on submission.
  */
-export async function POST() {
+export async function POST(req: NextRequest) {
+  const limited = draftLimiter(throttleKey(req.headers));
+  if (!limited.ok) {
+    return NextResponse.json(
+      { error: 'Too many attempts. Please wait a few minutes and try again.' },
+      { status: 429, headers: { 'Retry-After': String(limited.retryAfterSeconds) } },
+    );
+  }
+
   let nullifierSeed: bigint;
   try {
     nullifierSeed = loadConfig().nullifierSeed;

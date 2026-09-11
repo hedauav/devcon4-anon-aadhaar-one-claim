@@ -2,7 +2,7 @@
 
 import { LogInWithAnonAadhaar, useAnonAadhaar } from '@anon-aadhaar/react';
 import type { FieldsToRevealArray } from '@anon-aadhaar/core';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { SupportCategory } from '@/lib/categories';
 import IntakeQuestions, { type IntakeAnswers } from './IntakeQuestions';
 import StepHeader from './StepHeader';
@@ -12,6 +12,18 @@ import StepHeader from './StepHeader';
  * Gender and PIN code are never requested.
  */
 const FIELDS_TO_REVEAL: FieldsToRevealArray = ['revealAgeAbove18', 'revealState'];
+
+/** Where @anon-aadhaar/react persists its serialized proof state in the browser. */
+const SDK_STORAGE_KEY = 'anonAadhaar';
+
+/** Privacy: wipe the SDK's persisted proof so it never outlives this application attempt. */
+function forgetStoredProof() {
+  try {
+    window.localStorage.removeItem(SDK_STORAGE_KEY);
+  } catch {
+    // storage unavailable (private mode) — nothing to clear
+  }
+}
 
 /** Issued by POST /api/drafts. The signal and seed come from the server, not from this page. */
 type DraftTicket = {
@@ -48,8 +60,20 @@ export default function ApplicantSteps({ eligibleState }: { eligibleState: strin
     return null;
   }, [anonAadhaar, draft]);
 
+  // Clear any proof left from an earlier visit (this runs before the provider reads storage),
+  // and again when the applicant leaves the page or this flow unmounts.
+  useEffect(() => {
+    forgetStoredProof();
+    window.addEventListener('pagehide', forgetStoredProof);
+    return () => {
+      window.removeEventListener('pagehide', forgetStoredProof);
+      forgetStoredProof();
+    };
+  }, []);
+
   const clearProverState = () => {
     if (anonAadhaar.status === 'logged-in') startReq({ type: 'logout' });
+    forgetStoredProof();
   };
 
   async function startDraft() {
@@ -97,10 +121,11 @@ export default function ApplicantSteps({ eligibleState }: { eligibleState: strin
           ? { ok: true, applicationId: data.applicationId }
           : { ok: false, message: data.message ?? 'The application could not be recorded.' },
       );
-      startReq({ type: 'logout' }); // drop the proof from this browser's storage
+      clearProverState(); // accepted or refused: log out of the SDK and wipe its stored proof
     } catch {
       setError('Network error. Your proof is still here — try submitting again.');
     } finally {
+      forgetStoredProof(); // never leave the proof in localStorage, even for a retry
       setBusy(false);
     }
   }

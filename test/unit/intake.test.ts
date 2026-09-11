@@ -262,6 +262,32 @@ describe('intake: server-side proof verification', () => {
   });
 });
 
+describe('intake: cycle closed mid-submission', () => {
+  it('re-checks the cycle inside the transaction when it closes during verification', async () => {
+    let closeDuringVerify = () => {};
+    const env = setup({
+      verifier: async () => {
+        closeDuringVerify(); // a volunteer closes the cycle while the proof is being verified
+        return true;
+      },
+    });
+    closeDuringVerify = () => {
+      closeCycle(env.db, env.cycle.id);
+    };
+    const draft = createDraft(env.db, env.cycle.id);
+    const result = await env.intake.submit({
+      draftId: draft.draftId,
+      serializedProof: makeSerializedProof(draft),
+      form: FORM,
+    });
+    expect(result).toMatchObject({ ok: false, code: 'cycle_closed' });
+    expect(count(env.db, 'applications')).toBe(0);
+    expect(count(env.db, 'claims')).toBe(0);
+    expect(count(env.db, 'duplicate_attempts')).toBe(0);
+    expect(getDraft(env.db, draft.draftId)?.usedAt).toBeNull();
+  });
+});
+
 describe('intake: eligibility comes from the verified proof outputs', () => {
   it.each([
     ['under 18', { ageAbove18: '0' }],

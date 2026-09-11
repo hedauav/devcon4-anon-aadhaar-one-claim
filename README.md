@@ -103,6 +103,7 @@ To see the eligibility rule reject an applicant, set `ELIGIBLE_STATE` to another
 - Serve the app over HTTPS. The volunteer cookie is marked `Secure` in production.
 - Back up the SQLite file (`DATABASE_PATH`). The `claims` table is the record of who has taken a slot.
 - Use a long, unique `VOLUNTEER_PASSWORD` and `SESSION_SECRET`, and never commit `.env.local`.
+- `POST /api/drafts` (20 per 10 min) and volunteer sign-in (10 per 15 min) are rate-limited in memory per client (`lib/rate-limit.ts`). That's abuse throttling only; it never decides duplicates, which only the nullifier does. Behind a proxy, make sure `X-Forwarded-For` is set by the proxy itself.
 
 ---
 
@@ -116,6 +117,8 @@ To see the eligibility rule reject an applicant, set `ELIGIBLE_STATE` to another
 | Claims: `(cycle_id, nullifier) → application`                      | UIDAI certificate or signature                         |
 | Count of duplicate attempts per cycle (a timestamp only)           | The proof itself (checked, then discarded; not logged) |
 |                                                                    | Email, phone, IP address, device ID or wallet          |
+
+**Privacy guarantee.** No code in this repository sends, stores or logs the QR data, the UIDAI certificate or any decoded personal field. The QR is decoded and proven only inside the applicant's browser. The browser posts exactly `{ draftId, proof, form }`, and `app/api/applications/route.ts` rejects any other field. The proof contains only public signals: the app-scoped nullifier, the revealed predicate (`ageAbove18` flag and `state`), the QR signing time (to the hour), the office's nullifier seed and the signal hash. Gender and PIN code are never revealed.
 
 ---
 
@@ -142,6 +145,7 @@ To see the eligibility rule reject an applicant, set `ELIGIBLE_STATE` to another
 - passes its own **immutable `nullifierSeed`** to the verifier, never a caller-supplied seed,
 - requires the proof's signal to equal the application-derived value for the claim,
 - reads eligibility from `revealArray` (`ageAbove18 == 1`, `state ==` the configured packed state),
+- rejects stale proofs: `block.timestamp` may be at most the immutable `maxProofAge` plus one hour (the circuit rounds the QR time down to the hour) past the proof timestamp (`maxProofAge = 0` disables this),
 - keeps `mapping(uint256 cycle => mapping(uint256 nullifier => bool))`, which is read before write and reverts on a second claim.
 
 `contracts/mocks/MockAnonAadhaar.sol` stands in for the real verifier in tests.
@@ -198,7 +202,7 @@ test/
 
 ## Known limitations
 
-- **The browser SDK logs to the console.** `@anon-aadhaar/react` writes its own proof state to the applicant's browser console and `localStorage`. That's the proof (public signals), not QR data, and the app logs out of the SDK after submitting. This server never logs proofs.
+- **The browser SDK keeps and logs its proof.** `@anon-aadhaar/react` saves the serialized proof in the applicant's `localStorage` (key `anonAadhaar`) and prints its state to the browser console; that is SDK behaviour we can't switch off. The app deletes that key when the apply flow opens, after every submission (accepted or refused), and when the applicant leaves the page, and it logs out of the SDK. What the SDK keeps is only the proof, never QR data. This server never logs proofs.
 - **Nullifiers depend on the seed.** A nullifier is determined by (Aadhaar identity, seed). Rotating `NULLIFIER_SEED` gives everyone a fresh pseudonym and makes past claims unmatchable, so don't rotate it mid-cycle.
 - **Turn test mode off in production.** With `USE_TEST_AADHAAR=true`, anyone can make test QR codes. It exists for demos only.
 - **One device, one browser.** Proving needs a reasonably modern phone or laptop, and slow connections make the first artifact download take a while.

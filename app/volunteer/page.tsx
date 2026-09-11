@@ -17,6 +17,7 @@ const ERRORS: Record<string, string> = {
   config:
     'The dashboard is not configured. Set VOLUNTEER_PASSWORD and a 32+ character SESSION_SECRET in .env.local.',
   bad_passphrase: 'That passphrase is not correct.',
+  rate_limited: 'Too many sign-in attempts. Wait 15 minutes and try again.',
   session: 'Your session expired. Please sign in again.',
   name: 'Give the cycle a name (1–80 characters).',
   cycle_open: 'Close the current cycle before opening a new one.',

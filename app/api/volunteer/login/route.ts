@@ -6,6 +6,7 @@ import {
   getSessionSecret,
   passwordMatches,
 } from '@/lib/session';
+import { loginLimiter, throttleKey } from '@/lib/rate-limit';
 import { isPlaceholder, redirectToDashboard } from '@/lib/volunteer-auth';
 
 export const runtime = 'nodejs';
@@ -17,6 +18,10 @@ export async function POST(req: NextRequest) {
   const secret = getSessionSecret();
   if (!secret || isPlaceholder(secret) || isPlaceholder(expected)) {
     return redirectToDashboard(req, 'config');
+  }
+
+  if (!loginLimiter(throttleKey(req.headers)).ok) {
+    return redirectToDashboard(req, 'rate_limited');
   }
 
   const form = await req.formData();

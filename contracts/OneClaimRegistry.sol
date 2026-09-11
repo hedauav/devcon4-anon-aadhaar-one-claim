@@ -8,6 +8,11 @@ import {IAnonAadhaar} from "@anon-aadhaar/contracts/interfaces/IAnonAadhaar.sol"
 ///         an Anon Aadhaar zero-knowledge proof. The contract learns a predicate (18+ and resident
 ///         of the eligible state) and an app-scoped nullifier - never an Aadhaar number.
 contract OneClaimRegistry {
+    /// @notice The Anon Aadhaar circuit floors the QR signing time to the hour, so a fresh QR can
+    ///         carry a timestamp up to 59 minutes old (same allowance as the web path's
+    ///         QR_TIMESTAMP_ROUNDING_SECONDS in lib/intake.ts).
+    uint256 public constant TIMESTAMP_ROUNDING = 1 hours;
+
     /// @notice Anon Aadhaar verifier (IAnonAadhaar.verifyAnonAadhaarProof).
     IAnonAadhaar public immutable anonAadhaar;
 
@@ -18,6 +23,9 @@ contract OneClaimRegistry {
 
     /// @notice Eligible state packed exactly as the circuit reveals it (little-endian char bytes).
     uint256 public immutable eligibleState;
+
+    /// @notice Maximum age (seconds) of the QR signature a proof may carry; 0 disables the check.
+    uint256 public immutable maxProofAge;
 
     /// @notice The office that opens and closes cycles.
     address public immutable office;
@@ -39,6 +47,7 @@ contract OneClaimRegistry {
     error SignalMismatch();
     error Ineligible();
     error AlreadyClaimed();
+    error StaleProof();
     error InvalidProof();
 
     modifier onlyOffice() {
@@ -46,10 +55,16 @@ contract OneClaimRegistry {
         _;
     }
 
-    constructor(IAnonAadhaar _anonAadhaar, uint256 _nullifierSeed, uint256 _eligibleState) {
+    constructor(
+        IAnonAadhaar _anonAadhaar,
+        uint256 _nullifierSeed,
+        uint256 _eligibleState,
+        uint256 _maxProofAge
+    ) {
         anonAadhaar = _anonAadhaar;
         nullifierSeed = _nullifierSeed;
         eligibleState = _eligibleState;
+        maxProofAge = _maxProofAge;
         office = msg.sender;
     }
 
@@ -83,7 +98,7 @@ contract OneClaimRegistry {
     /// @notice Take this cycle's slot with an Anon Aadhaar proof.
     /// @param draftId Applicant-chosen draft identifier the signal was derived from.
     /// @param nullifier App-scoped nullifier output by the proof.
-    /// @param timestamp QR signature timestamp output by the proof.
+    /// @param timestamp QR signature timestamp output by the proof (floored to the hour).
     /// @param signal Raw signal committed in the proof (the verifier hashes it).
     /// @param revealArray [ageAbove18, gender, pincode, state] revealed by the proof.
     /// @param groth16Proof Packed groth16 proof (packGroth16Proof from @anon-aadhaar/core).
@@ -108,6 +123,12 @@ contract OneClaimRegistry {
 
         // INVARIANT (one claim per human per cycle): read the ledger before writing it.
         if (hasClaimed[cycle][nullifier]) revert AlreadyClaimed();
+
+        // QR freshness: reject proofs over QR codes signed longer ago than maxProofAge, allowing
+        // for the circuit's hour rounding. The timestamp is a public input the verifier checks.
+        if (maxProofAge != 0 && block.timestamp > timestamp + maxProofAge + TIMESTAMP_ROUNDING) {
+            revert StaleProof();
+        }
 
         // INVARIANT (seed fixed by the app): the immutable nullifierSeed is passed, never a
         // caller-chosen one, so a proof generated under any other seed cannot verify.

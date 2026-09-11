@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   SESSION_TTL_SECONDS,
@@ -7,9 +8,10 @@ import {
   verifySessionToken,
 } from '@/lib/session';
 
-// Obviously-fake values built at runtime; nothing here is a real credential.
-const SECRET = 'test-secret-' + 'x'.repeat(32);
-const OTHER_SECRET = 'test-secret-' + 'y'.repeat(32);
+// Throwaway values generated fresh for every run; no secret is ever written in this repo.
+const randomValue = () => randomBytes(24).toString('hex');
+const SECRET = randomValue();
+const OTHER_SECRET = randomValue();
 
 describe('volunteer session token', () => {
   it('round-trips with the same secret', () => {
@@ -45,25 +47,28 @@ describe('volunteer session token', () => {
 });
 
 describe('passwordMatches', () => {
-  const expected = 'fake-volunteer-' + 'z'.repeat(8);
+  const expected = randomValue();
 
-  it('accepts the exact password only', () => {
+  it('accepts the exact passphrase only', () => {
     expect(passwordMatches(expected, expected)).toBe(true);
     expect(passwordMatches(expected + '!', expected)).toBe(false);
     expect(passwordMatches('', expected)).toBe(false);
   });
 
-  it('fails closed when no password is configured', () => {
-    expect(passwordMatches('anything', undefined)).toBe(false);
+  it('fails closed when no passphrase is configured', () => {
+    expect(passwordMatches(randomValue(), undefined)).toBe(false);
     expect(passwordMatches('', '')).toBe(false);
   });
 });
 
 describe('getSessionSecret', () => {
-  it('refuses missing or short secrets', () => {
+  it('refuses missing, short or placeholder secrets', () => {
     const env = (values: Record<string, string>) => values as unknown as NodeJS.ProcessEnv;
     expect(getSessionSecret(env({}))).toBeUndefined();
-    expect(getSessionSecret(env({ SESSION_SECRET: 'short' }))).toBeUndefined();
+    expect(getSessionSecret(env({ SESSION_SECRET: randomValue().slice(0, 8) }))).toBeUndefined();
+    expect(
+      getSessionSecret(env({ SESSION_SECRET: `replace-with-${randomValue()}` })),
+    ).toBeUndefined();
     expect(getSessionSecret(env({ SESSION_SECRET: SECRET }))).toBe(SECRET);
   });
 });

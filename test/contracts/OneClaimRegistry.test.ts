@@ -1,4 +1,4 @@
-import { loadFixture } from '@nomicfoundation/hardhat-toolbox/network-helpers';
+import { loadFixture, time } from '@nomicfoundation/hardhat-toolbox/network-helpers';
 import { expect } from 'chai';
 import { ethers } from 'hardhat';
 import { DUMMY_PROOF, packState } from './helpers';
@@ -6,7 +6,8 @@ import { DUMMY_PROOF, packState } from './helpers';
 const SEED = 424242n;
 const ELIGIBLE = packState('Delhi');
 const NULLIFIER = 987654321n;
-const TIMESTAMP = 1_700_000_000n;
+const HOUR = 3600n;
+const MAX_PROOF_AGE = HOUR;
 
 const reveal = (age: bigint, state: bigint): [bigint, bigint, bigint, bigint] => [
   age,
@@ -15,13 +16,19 @@ const reveal = (age: bigint, state: bigint): [bigint, bigint, bigint, bigint] =>
   state,
 ];
 
-async function deploy(registrySeed: bigint, verifierSeed: bigint) {
+/** Timestamp of the latest block: a QR signed "just now" as far as the chain is concerned. */
+async function now(): Promise<bigint> {
+  return BigInt(await time.latest());
+}
+
+async function deploy(registrySeed: bigint, verifierSeed: bigint, maxProofAge = MAX_PROOF_AGE) {
   const [office, applicant, other] = await ethers.getSigners();
   const verifier = await ethers.deployContract('MockAnonAadhaar', [verifierSeed]);
   const registry = await ethers.deployContract('OneClaimRegistry', [
     await verifier.getAddress(),
     registrySeed,
     ELIGIBLE,
+    maxProofAge,
   ]);
   return { office, applicant, other, verifier, registry };
 }
@@ -38,11 +45,19 @@ async function deploySeedMismatch() {
   return fx;
 }
 
+async function deployOpenNoAgeLimit() {
+  const fx = await deploy(SEED, SEED, 0n);
+  await fx.registry.openCycle();
+  return fx;
+}
+
 describe('OneClaimRegistry', () => {
-  it('stores the app-fixed seed and eligible state as immutables', async () => {
+  it('stores the app-fixed seed, eligible state and max proof age as immutables', async () => {
     const { registry, office } = await loadFixture(deployOpen);
     expect(await registry.nullifierSeed()).to.equal(SEED);
     expect(await registry.eligibleState()).to.equal(ELIGIBLE);
+    expect(await registry.maxProofAge()).to.equal(MAX_PROOF_AGE);
+    expect(await registry.TIMESTAMP_ROUNDING()).to.equal(HOUR);
     expect(await registry.office()).to.equal(office.address);
   });
 
@@ -59,7 +74,7 @@ describe('OneClaimRegistry', () => {
     await expect(
       registry
         .connect(applicant)
-        .claim(draftId, NULLIFIER, TIMESTAMP, signal, reveal(1n, ELIGIBLE), DUMMY_PROOF),
+        .claim(draftId, NULLIFIER, await now(), signal, reveal(1n, ELIGIBLE), DUMMY_PROOF),
     )
       .to.emit(registry, 'Claimed')
       .withArgs(1n, NULLIFIER, draftId);
@@ -77,12 +92,12 @@ describe('OneClaimRegistry', () => {
 
     await registry
       .connect(applicant)
-      .claim(draft1, NULLIFIER, TIMESTAMP, signal1, reveal(1n, ELIGIBLE), DUMMY_PROOF);
+      .claim(draft1, NULLIFIER, await now(), signal1, reveal(1n, ELIGIBLE), DUMMY_PROOF);
 
     await expect(
       registry
         .connect(applicant)
-        .claim(draft2, NULLIFIER, TIMESTAMP, signal2, reveal(1n, ELIGIBLE), DUMMY_PROOF),
+        .claim(draft2, NULLIFIER, await now(), signal2, reveal(1n, ELIGIBLE), DUMMY_PROOF),
     ).to.be.revertedWithCustomError(registry, 'AlreadyClaimed');
     expect(await registry.claimCount(1n)).to.equal(1n);
   });
@@ -93,7 +108,7 @@ describe('OneClaimRegistry', () => {
     const signal1 = await registry.applicationSignal(1n, applicant.address, draftId);
     await registry
       .connect(applicant)
-      .claim(draftId, NULLIFIER, TIMESTAMP, signal1, reveal(1n, ELIGIBLE), DUMMY_PROOF);
+      .claim(draftId, NULLIFIER, await now(), signal1, reveal(1n, ELIGIBLE), DUMMY_PROOF);
 
     await registry.closeCycle();
     await registry.openCycle();
@@ -102,7 +117,7 @@ describe('OneClaimRegistry', () => {
     await expect(
       registry
         .connect(applicant)
-        .claim(draftId, NULLIFIER, TIMESTAMP, signal2, reveal(1n, ELIGIBLE), DUMMY_PROOF),
+        .claim(draftId, NULLIFIER, await now(), signal2, reveal(1n, ELIGIBLE), DUMMY_PROOF),
     )
       .to.emit(registry, 'Claimed')
       .withArgs(2n, NULLIFIER, draftId);
@@ -121,7 +136,7 @@ describe('OneClaimRegistry', () => {
         .claim(
           ethers.id('draft-1'),
           NULLIFIER,
-          TIMESTAMP,
+          await now(),
           signalForOtherDraft,
           reveal(1n, ELIGIBLE),
           DUMMY_PROOF,
@@ -136,7 +151,7 @@ describe('OneClaimRegistry', () => {
     await expect(
       registry
         .connect(other)
-        .claim(draftId, NULLIFIER, TIMESTAMP, applicantSignal, reveal(1n, ELIGIBLE), DUMMY_PROOF),
+        .claim(draftId, NULLIFIER, await now(), applicantSignal, reveal(1n, ELIGIBLE), DUMMY_PROOF),
     ).to.be.revertedWithCustomError(registry, 'SignalMismatch');
   });
 
@@ -147,7 +162,7 @@ describe('OneClaimRegistry', () => {
     await expect(
       registry
         .connect(applicant)
-        .claim(draftId, NULLIFIER, TIMESTAMP, signal, reveal(0n, ELIGIBLE), DUMMY_PROOF),
+        .claim(draftId, NULLIFIER, await now(), signal, reveal(0n, ELIGIBLE), DUMMY_PROOF),
     ).to.be.revertedWithCustomError(registry, 'Ineligible');
   });
 
@@ -158,8 +173,57 @@ describe('OneClaimRegistry', () => {
     await expect(
       registry
         .connect(applicant)
-        .claim(draftId, NULLIFIER, TIMESTAMP, signal, reveal(1n, packState('Kerala')), DUMMY_PROOF),
+        .claim(
+          draftId,
+          NULLIFIER,
+          await now(),
+          signal,
+          reveal(1n, packState('Kerala')),
+          DUMMY_PROOF,
+        ),
     ).to.be.revertedWithCustomError(registry, 'Ineligible');
+  });
+
+  it('rejects a proof over a QR signed longer ago than maxProofAge plus hour rounding', async () => {
+    const { registry, applicant } = await loadFixture(deployOpen);
+    const draftId = ethers.id('draft-1');
+    const signal = await registry.applicationSignal(1n, applicant.address, draftId);
+    const stale = (await now()) - MAX_PROOF_AGE - HOUR - 1n;
+    await expect(
+      registry
+        .connect(applicant)
+        .claim(draftId, NULLIFIER, stale, signal, reveal(1n, ELIGIBLE), DUMMY_PROOF),
+    ).to.be.revertedWithCustomError(registry, 'StaleProof');
+    expect(await registry.hasClaimed(1n, NULLIFIER)).to.equal(false);
+  });
+
+  it('accepts a fresh QR whose circuit timestamp was rounded down to the hour', async () => {
+    const { registry, applicant } = await loadFixture(deployOpen);
+    const draftId = ethers.id('draft-1');
+    const signal = await registry.applicationSignal(1n, applicant.address, draftId);
+    const roundedDown = (await now()) - HOUR - 1800n;
+    await expect(
+      registry
+        .connect(applicant)
+        .claim(draftId, NULLIFIER, roundedDown, signal, reveal(1n, ELIGIBLE), DUMMY_PROOF),
+    )
+      .to.emit(registry, 'Claimed')
+      .withArgs(1n, NULLIFIER, draftId);
+  });
+
+  it('skips the freshness check when maxProofAge is 0', async () => {
+    const { registry, applicant } = await loadFixture(deployOpenNoAgeLimit);
+    expect(await registry.maxProofAge()).to.equal(0n);
+    const draftId = ethers.id('draft-1');
+    const signal = await registry.applicationSignal(1n, applicant.address, draftId);
+    const veryOld = (await now()) - 365n * 24n * HOUR;
+    await expect(
+      registry
+        .connect(applicant)
+        .claim(draftId, NULLIFIER, veryOld, signal, reveal(1n, ELIGIBLE), DUMMY_PROOF),
+    )
+      .to.emit(registry, 'Claimed')
+      .withArgs(1n, NULLIFIER, draftId);
   });
 
   it('rejects an invalid proof', async () => {
@@ -170,7 +234,7 @@ describe('OneClaimRegistry', () => {
     await expect(
       registry
         .connect(applicant)
-        .claim(draftId, NULLIFIER, TIMESTAMP, signal, reveal(1n, ELIGIBLE), DUMMY_PROOF),
+        .claim(draftId, NULLIFIER, await now(), signal, reveal(1n, ELIGIBLE), DUMMY_PROOF),
     ).to.be.revertedWithCustomError(registry, 'InvalidProof');
     expect(await registry.hasClaimed(1n, NULLIFIER)).to.equal(false);
   });
@@ -182,7 +246,7 @@ describe('OneClaimRegistry', () => {
     await expect(
       registry
         .connect(applicant)
-        .claim(draftId, NULLIFIER, TIMESTAMP, signal, reveal(1n, ELIGIBLE), DUMMY_PROOF),
+        .claim(draftId, NULLIFIER, await now(), signal, reveal(1n, ELIGIBLE), DUMMY_PROOF),
     ).to.be.revertedWithCustomError(registry, 'InvalidProof');
   });
 
@@ -207,7 +271,7 @@ describe('OneClaimRegistry', () => {
     await expect(
       registry
         .connect(applicant)
-        .claim(draftId, NULLIFIER, TIMESTAMP, signal, reveal(1n, ELIGIBLE), DUMMY_PROOF),
+        .claim(draftId, NULLIFIER, await now(), signal, reveal(1n, ELIGIBLE), DUMMY_PROOF),
     ).to.be.revertedWithCustomError(registry, 'CycleNotOpen');
   });
 
